@@ -98,7 +98,7 @@ if __name__ == "__main__":
 
     
     # Load SMPLX trajectory
-    lafan1_data_frames, actual_human_height = load_bvh_file(args.bvh_file, format=args.format)
+    lafan1_data_frames, actual_human_height, bone_hierarchy = load_bvh_file(args.bvh_file, format=args.format)
     
     
     # Initialize the retargeting system
@@ -108,6 +108,7 @@ if __name__ == "__main__":
             tgt_robot=args.robot,
             actual_human_height=actual_human_height,
         )
+        retargeter._bone_hierarchy = bone_hierarchy
     else:
         retargeter = GMR(
             src_human=f"bvh_{args.format}",

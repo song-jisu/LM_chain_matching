@@ -45,6 +45,12 @@ def load_bvh_file(bvh_file, format="lafan1"):
     # human_height = human_height + 0.2  # cm to m
     human_height = 1.75  # cm to m
 
-    return frames, human_height
+    # bone hierarchy 정보 (chain 추출용)
+    bone_hierarchy = {
+        "bones": list(data.bones),
+        "parents": data.parents.tolist(),
+    }
+
+    return frames, human_height, bone_hierarchy
 
 

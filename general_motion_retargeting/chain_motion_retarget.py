@@ -167,28 +167,35 @@ class ChainMotionRetargeting:
 
     def _extract_source_chains(self, source_bones, human_data):
         """source BVH의 bone hierarchy에서 serial chain 추출.
-        bone 위치의 parent-child 관계를 거리로 추정."""
-        positions = {b: np.asarray(human_data[b][0]) for b in source_bones}
+        bone_hierarchy가 있으면 실제 parent 배열 사용."""
+        bones = source_bones
 
-        # parent 추정: 각 bone에서 가장 가까운 이전 bone
-        parents = {source_bones[0]: None}
-        children = {b: [] for b in source_bones}
-        for i in range(1, len(source_bones)):
-            bone = source_bones[i]
-            pos = positions[bone]
-            best_parent = None
-            best_dist = np.inf
-            for j in range(i):
-                p = source_bones[j]
-                d = np.linalg.norm(pos - positions[p])
-                if d < best_dist:
-                    best_dist = d
-                    best_parent = p
-            parents[bone] = best_parent
-            children[best_parent].append(bone)
+        # bone_hierarchy에서 실제 parent-child 관계 사용
+        if hasattr(self, '_bone_hierarchy') and self._bone_hierarchy:
+            bh = self._bone_hierarchy
+            bones = bh['bones']
+            parent_indices = bh['parents']
 
-        # 분기점: children 2개 이상
-        branch_points = {b for b in source_bones if len(children[b]) >= 2}
+            children = {b: [] for b in bones}
+            for i in range(len(bones)):
+                pi = parent_indices[i]
+                if pi >= 0:
+                    children[bones[pi]].append(bones[i])
+        else:
+            # fallback: 거리 기반 추정
+            children = {b: [] for b in bones}
+            for i in range(1, len(bones)):
+                bone = bones[i]
+                pos = np.asarray(human_data[bone][0])
+                best_parent = bones[0]
+                best_dist = np.inf
+                for j in range(i):
+                    p = bones[j]
+                    d = np.linalg.norm(pos - np.asarray(human_data[p][0]))
+                    if d < best_dist:
+                        best_dist = d
+                        best_parent = p
+                children[best_parent].append(bone)
 
         # serial chain 추출
         chains = []
@@ -197,30 +204,29 @@ class ChainMotionRetargeting:
             chain_bones = [start_bone]
             bone = start_bone
             while True:
-                kids = children[bone]
+                kids = children.get(bone, [])
                 if len(kids) == 0:
                     break
                 elif len(kids) == 1:
                     bone = kids[0]
                     chain_bones.append(bone)
                 else:
-                    break  # branch point
+                    break
 
             if len(chain_bones) >= 2:
                 chains.append(chain_bones)
 
-            # branch point에서 각 가지로 재귀
-            if len(children[bone]) >= 2:
+            if len(children.get(bone, [])) >= 2:
                 for kid in children[bone]:
                     trace(kid)
 
-        # root에서 시작
-        root = source_bones[0]
-        if len(children[root]) >= 2:
-            for kid in children[root]:
+        root = bones[0]
+        kids = children.get(root, [])
+        if len(kids) >= 2:
+            for kid in kids:
                 trace(kid)
-        elif len(children[root]) == 1:
-            trace(children[root][0])
+        elif len(kids) == 1:
+            trace(kids[0])
 
         return chains
 
