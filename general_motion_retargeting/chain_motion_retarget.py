@@ -166,97 +166,140 @@ class ChainMotionRetargeting:
             pass  # CLI matching 필요
 
     def _extract_source_chains(self, source_bones, human_data):
-        """source BVH의 bone hierarchy에서 chain 추출."""
-        # parent-child 관계 추정: bone 순서에서 인접 bone 간 거리로
+        """source BVH의 bone hierarchy에서 serial chain 추출.
+        bone 위치의 parent-child 관계를 거리로 추정."""
         positions = {b: np.asarray(human_data[b][0]) for b in source_bones}
 
-        # 분기점 감지: 각 bone에서 가장 가까운 bone을 parent로
-        # BVH는 보통 DFS 순서이므로 hierarchy를 순서에서 추정
-        # 간단히: bone 리스트를 그대로 chain으로 표시
-        src_chains = []
-        # bone 간 거리 행렬로 연결 관계 추정은 복잡하므로,
-        # bone 리스트와 위치만 표시
-        return source_bones
+        # parent 추정: 각 bone에서 가장 가까운 이전 bone
+        parents = {source_bones[0]: None}
+        children = {b: [] for b in source_bones}
+        for i in range(1, len(source_bones)):
+            bone = source_bones[i]
+            pos = positions[bone]
+            best_parent = None
+            best_dist = np.inf
+            for j in range(i):
+                p = source_bones[j]
+                d = np.linalg.norm(pos - positions[p])
+                if d < best_dist:
+                    best_dist = d
+                    best_parent = p
+            parents[bone] = best_parent
+            children[best_parent].append(bone)
+
+        # 분기점: children 2개 이상
+        branch_points = {b for b in source_bones if len(children[b]) >= 2}
+
+        # serial chain 추출
+        chains = []
+
+        def trace(start_bone):
+            chain_bones = [start_bone]
+            bone = start_bone
+            while True:
+                kids = children[bone]
+                if len(kids) == 0:
+                    break
+                elif len(kids) == 1:
+                    bone = kids[0]
+                    chain_bones.append(bone)
+                else:
+                    break  # branch point
+
+            if len(chain_bones) >= 2:
+                chains.append(chain_bones)
+
+            # branch point에서 각 가지로 재귀
+            if len(children[bone]) >= 2:
+                for kid in children[bone]:
+                    trace(kid)
+
+        # root에서 시작
+        root = source_bones[0]
+        if len(children[root]) >= 2:
+            for kid in children[root]:
+                trace(kid)
+        elif len(children[root]) == 1:
+            trace(children[root][0])
+
+        return chains
 
     def setup_cli_matching(self, source_bones, human_data=None):
-        """CLI로 source↔target chain 매칭 + root chain 선택.
-        chain 단위로 매핑: src_chain → tgt_chain, body는 순서대로 자동 대응.
-        """
+        """CLI로 source chain ↔ target chain 매칭 + root chain 선택."""
         print(f"\n{'='*60}")
         print(f"  Chain Matching Setup")
         print(f"{'='*60}")
 
-        # Source bones 표시
-        print(f"\n  Source bones ({len(source_bones)}):")
-        for i, b in enumerate(source_bones):
-            pos = ""
-            if human_data and b in human_data:
-                p = np.asarray(human_data[b][0])
-                pos = f" pos=[{p[0]:.2f},{p[1]:.2f},{p[2]:.2f}]"
-            print(f"    [{i:2d}] {b}{pos}")
+        # Source chain 추출
+        src_chains = self._extract_source_chains(source_bones, human_data) if human_data else []
 
-        # Target chains 표시
-        print(f"\n  Target robot chains:")
+        print(f"\n  Source chains:")
+        if src_chains:
+            for si, sc in enumerate(src_chains):
+                print(f"    [S{si}] {sc[0]} -> {sc[-1]} ({len(sc)} bodies)")
+                print(f"         {sc}")
+        else:
+            print(f"    (chain 추출 실패, bone 리스트 사용)")
+            for i, b in enumerate(source_bones):
+                print(f"    [{i}] {b}")
+
+        print(f"\n  Target chains:")
         for ci, ch in enumerate(self.chains):
             bodies = [self.body_id2name[b] for b in ch['body_ids']]
-            print(f"    [{ci}] {ch['name']} ({len(bodies)} bodies)")
-            for bi, bname in enumerate(bodies):
-                print(f"         [{bi}] {bname}")
+            print(f"    [T{ci}] {ch['name']} ({len(bodies)} bodies)")
+            print(f"         {bodies}")
 
-        # Chain 매칭: source bone 이름들 → target chain
-        print(f"\n  Match source bones to each target chain.")
-        print(f"  Enter source bone names in order (comma separated).")
-        print(f"  These will be mapped to target chain bodies by position order.")
-        print(f"  Enter 'skip' to skip a chain.\n")
+        # Chain ↔ Chain 매칭
+        print(f"\n  Match source chain → target chain.")
+        print(f"  Format: S0->T0, S1->T1, ...")
+        print(f"  Body mapping is automatic (by position order).\n")
 
-        for ci, ch in enumerate(self.chains):
-            bodies = [self.body_id2name[b] for b in ch['body_ids']]
-            print(f"  Target chain [{ci}] {ch['name']}:")
-            print(f"    bodies: {bodies}")
+        match_input = input(f"  Chain matching (e.g. 0->0,1->1,2->2): ").strip()
 
-            user = input(f"    Source bones (e.g. bone1,bone2,bone3) or 'skip': ").strip()
-            if user.lower() == 'skip' or not user:
+        chain_pairs = []  # (src_chain_idx, tgt_chain_idx)
+        for pair in match_input.split(','):
+            pair = pair.strip().replace('S', '').replace('T', '')
+            if '->' not in pair:
                 continue
+            parts = pair.split('->')
+            try:
+                si = int(parts[0].strip())
+                ti = int(parts[1].strip())
+                chain_pairs.append((si, ti))
+            except (ValueError, IndexError):
+                print(f"    Invalid: {pair}")
 
-            src_names = [s.strip() for s in user.split(',')]
-            # source bones를 target chain bodies에 순서대로 매핑
-            # source가 적으면: 앞에서부터 매핑, 나머지 None
-            # source가 많으면: 균등 분배
-            n_src = len(src_names)
-            n_tgt = len(ch['body_ids'])
+        # 매칭된 chain 쌍의 body를 순서대로 대응
+        for si, ti in chain_pairs:
+            if not src_chains or si >= len(src_chains) or ti >= len(self.chains):
+                continue
+            src_chain_bones = src_chains[si]
+            tgt_chain = self.chains[ti]
+            n_src = len(src_chain_bones)
+            n_tgt = len(tgt_chain['body_ids'])
 
-            if n_src <= n_tgt:
-                # target의 앞쪽 body부터 매핑
-                # 간격: target body 수 / source body 수
-                for si, sname in enumerate(src_names):
-                    if sname in source_bones:
-                        # 균등 분배: si번째 source → target의 (si * n_tgt // n_src) 위치
-                        tgt_idx = si * n_tgt // n_src if n_src > 1 else 0
-                        tgt_idx = min(tgt_idx, n_tgt - 1)
-                        ch['human_bodies'][tgt_idx] = sname
-            else:
-                # source가 더 많으면: target body 수만큼만 사용
-                for ti in range(n_tgt):
-                    si = ti * n_src // n_tgt
-                    if si < n_src and src_names[si] in source_bones:
-                        ch['human_bodies'][ti] = src_names[si]
+            # 균등 분배: source body를 target body에 매핑
+            for si_body in range(n_src):
+                tgt_idx = si_body * n_tgt // n_src if n_src > 1 else 0
+                tgt_idx = min(tgt_idx, n_tgt - 1)
+                if src_chain_bones[si_body] in source_bones:
+                    tgt_chain['human_bodies'][tgt_idx] = src_chain_bones[si_body]
 
-            mapped = [(bi, hb) for bi, hb in enumerate(ch['human_bodies']) if hb]
-            print(f"    -> mapped: {mapped}")
+            mapped = [(bi, hb) for bi, hb in enumerate(tgt_chain['human_bodies']) if hb]
+            print(f"    S{si} -> T{ti}: {len(mapped)} mapped")
 
         # Root chain 선택
-        print(f"\n  Select root chains (for pelvis yaw).")
-        print(f"  Root chains' start positions define body orientation.")
-        print(f"  Usually leg chains (2 or more).")
-        root_input = input(f"  Root chain indices (e.g. 0,1): ").strip()
+        print(f"\n  Select root chains (target chain indices for pelvis yaw).")
+        print(f"  Usually leg chains whose start positions define body orientation.")
+        root_input = input(f"  Root target chain indices (e.g. 0,1): ").strip()
         try:
             self.root_chain_indices = [int(x.strip()) for x in root_input.split(',')]
         except ValueError:
             self.root_chain_indices = [0, 1] if len(self.chains) >= 2 else [0]
 
-        # Human root name 선택
-        print(f"\n  Select root body (pelvis/hips) from source bones.")
-        root_body = input(f"  Root body name (default: first root chain mapped body): ").strip()
+        # Root body 선택
+        print(f"\n  Select root body name from source bones (pelvis/hips).")
+        root_body = input(f"  Root body name: ").strip()
         if root_body and root_body in source_bones:
             self.human_root_name = root_body
         else:
@@ -287,7 +330,7 @@ class ChainMotionRetargeting:
         for ci, ch in enumerate(self.chains):
             mapped = [(bi, hb) for bi, hb in enumerate(ch['human_bodies']) if hb]
             if mapped:
-                print(f"  Chain [{ci}] {ch['name']}: {mapped}")
+                print(f"  T[{ci}] {ch['name']}: {mapped}")
         print(f"  {'='*40}\n")
 
     # ==================================================================
