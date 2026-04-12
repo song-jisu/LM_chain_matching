@@ -29,12 +29,13 @@ def load_bvh_file(bvh_file, format="lafan1"):
             result[bone] = [position, orientation]
             
         if format == "lafan1":
-            # Add modified foot pose
             result["LeftFootMod"] = [result["LeftFoot"][0], result["LeftToe"][1]]
             result["RightFootMod"] = [result["RightFoot"][0], result["RightToe"][1]]
         elif format == "nokov":
             result["LeftFootMod"] = [result["LeftFoot"][0], result["LeftToeBase"][1]]
             result["RightFootMod"] = [result["RightFoot"][0], result["RightToeBase"][1]]
+        elif format == "robot":
+            pass  # robot BVH: bone name 그대로 사용, FootMod 없음
         else:
             raise ValueError(f"Invalid format: {format}")
             

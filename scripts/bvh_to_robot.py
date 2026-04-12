@@ -2,6 +2,7 @@ import argparse
 import pathlib
 import time
 from general_motion_retargeting import GeneralMotionRetargeting as GMR
+from general_motion_retargeting import ChainMotionRetargeting
 from general_motion_retargeting import RobotMotionViewer
 from general_motion_retargeting.utils.lafan1 import load_bvh_file
 from rich import print
@@ -23,7 +24,7 @@ if __name__ == "__main__":
     
     parser.add_argument(
         "--format",
-        choices=["lafan1", "nokov"],
+        choices=["lafan1", "nokov", "robot"],
         default="lafan1",
     )
     
@@ -70,14 +71,30 @@ if __name__ == "__main__":
         default=30,
         type=int,
     )
-    
+
+    parser.add_argument(
+        "--save_bvh",
+        default=None,
+        help="Path to save robot motion as BVH file.",
+    )
+
+    parser.add_argument(
+        "--method",
+        choices=["ik", "chain"],
+        default="ik",
+        help="Retargeting method: 'ik' (GMR default) or 'chain' (chain-based)",
+    )
+
     args = parser.parse_args()
     
     if args.save_path is not None:
         save_dir = os.path.dirname(args.save_path)
-        if save_dir:  # Only create directory if it's not empty
+        if save_dir:
             os.makedirs(save_dir, exist_ok=True)
         qpos_list = []
+
+    if args.save_bvh is not None:
+        bvh_frames = []  # list of dicts {body_name: (pos, quat)}
 
     
     # Load SMPLX trajectory
@@ -85,11 +102,18 @@ if __name__ == "__main__":
     
     
     # Initialize the retargeting system
-    retargeter = GMR(
-        src_human=f"bvh_{args.format}",
-        tgt_robot=args.robot,
-        actual_human_height=actual_human_height,
-    )
+    if args.method == "chain":
+        retargeter = ChainMotionRetargeting(
+            src_human=f"bvh_{args.format}",
+            tgt_robot=args.robot,
+            actual_human_height=actual_human_height,
+        )
+    else:
+        retargeter = GMR(
+            src_human=f"bvh_{args.format}",
+            tgt_robot=args.robot,
+            actual_human_height=actual_human_height,
+        )
 
     motion_fps = args.motion_fps
     
@@ -159,6 +183,21 @@ if __name__ == "__main__":
         
         if args.save_path is not None:
             qpos_list.append(qpos)
+
+        if args.save_bvh is not None:
+            # robot body positions + orientations 수집
+            import mujoco
+            mujoco.mj_forward(retargeter.model, retargeter.data)
+            frame = {}
+            for bid in range(retargeter.model.nbody):
+                name = mujoco.mj_id2name(retargeter.model, mujoco.mjtObj.mjOBJ_BODY, bid)
+                if name and name != 'world':
+                    pos = retargeter.data.xpos[bid].copy()
+                    xmat = retargeter.data.xmat[bid].reshape(3, 3)
+                    from scipy.spatial.transform import Rotation as Rot
+                    quat = Rot.from_matrix(xmat).as_quat(scalar_first=True)
+                    frame[name] = (pos.tolist(), quat.tolist())
+            bvh_frames.append(frame)
     
     if args.save_path is not None:
         import pickle
@@ -180,6 +219,119 @@ if __name__ == "__main__":
         with open(args.save_path, "wb") as f:
             pickle.dump(motion_data, f)
         print(f"Saved to {args.save_path}")
+
+    # Save BVH
+    if args.save_bvh is not None and bvh_frames:
+        import mujoco
+        from scipy.spatial.transform import Rotation as Rot
+
+        model = retargeter.model
+        data = retargeter.data
+
+        # Robot body tree → BVH hierarchy
+        # BVH에 포함할 body: mapped body만 (chain의 human_bodies가 있는 body)
+        # 간단히: 모든 non-world body를 포함
+        children = {}
+        for bid in range(model.nbody):
+            children[bid] = []
+        for bid in range(1, model.nbody):
+            pid = int(model.body_parentid[bid])
+            children[pid].append(bid)
+
+        def body_name(bid):
+            return mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, bid)
+
+        # BVH hierarchy 문자열 생성
+        root_bid = 1  # first non-world body
+        frame_time = 1.0 / motion_fps
+
+        def write_hierarchy(bid, depth=0):
+            name = body_name(bid)
+            offset = model.body_pos[bid] * 100  # m → cm
+            indent = "\t" * depth
+            lines = []
+            if depth == 0:
+                lines.append(f"ROOT {name}")
+            else:
+                lines.append(f"{indent}JOINT {name}")
+            lines.append(f"{indent}{{")
+            lines.append(f"{indent}\tOFFSET {offset[0]:.6f} {offset[1]:.6f} {offset[2]:.6f}")
+            if depth == 0:
+                lines.append(f"{indent}\tCHANNELS 6 Xposition Yposition Zposition Zrotation Yrotation Xrotation")
+            else:
+                lines.append(f"{indent}\tCHANNELS 3 Zrotation Yrotation Xrotation")
+
+            kids = children[bid]
+            if not kids:
+                lines.append(f"{indent}\tEnd Site")
+                lines.append(f"{indent}\t{{")
+                lines.append(f"{indent}\t\tOFFSET 0.000000 0.000000 0.000000")
+                lines.append(f"{indent}\t}}")
+            else:
+                for kid in kids:
+                    lines.extend(write_hierarchy(kid, depth + 1))
+
+            lines.append(f"{indent}}}")
+            return lines
+
+        hierarchy = ["HIERARCHY"]
+        hierarchy.extend(write_hierarchy(root_bid))
+
+        # Motion data: 각 프레임의 body global pos/rot → local euler
+        motion_lines = ["MOTION"]
+        motion_lines.append(f"Frames: {len(bvh_frames)}")
+        motion_lines.append(f"Frame Time: {frame_time:.6f}")
+
+        # body 순서 (DFS)
+        body_order = []
+        def collect_order(bid):
+            body_order.append(bid)
+            for kid in children[bid]:
+                collect_order(kid)
+        collect_order(root_bid)
+
+        for frame in bvh_frames:
+            vals = []
+            for bid in body_order:
+                name = body_name(bid)
+                if name not in frame:
+                    if bid == root_bid:
+                        vals.extend([0, 0, 0, 0, 0, 0])
+                    else:
+                        vals.extend([0, 0, 0])
+                    continue
+
+                pos, quat = frame[name]
+                pos = np.array(pos)
+                quat = np.array(quat)
+
+                # global rotation → local rotation (parent 기준)
+                pid = int(model.body_parentid[bid])
+                pname = body_name(pid)
+                if pid > 0 and pname in frame:
+                    p_quat = np.array(frame[pname][1])
+                    r_parent = Rot.from_quat(p_quat, scalar_first=True)
+                    r_global = Rot.from_quat(quat, scalar_first=True)
+                    r_local = r_parent.inv() * r_global
+                else:
+                    r_local = Rot.from_quat(quat, scalar_first=True)
+
+                euler = r_local.as_euler('ZYX', degrees=True)  # BVH: ZYX order
+
+                if bid == root_bid:
+                    vals.extend([pos[0]*100, pos[1]*100, pos[2]*100])  # cm
+                    vals.extend(euler.tolist())
+                else:
+                    vals.extend(euler.tolist())
+
+            motion_lines.append(" ".join(f"{v:.6f}" for v in vals))
+
+        # Write BVH file
+        with open(args.save_bvh, "w") as f:
+            f.write("\n".join(hierarchy) + "\n")
+            f.write("\n".join(motion_lines) + "\n")
+
+        print(f"Saved robot BVH to {args.save_bvh} ({len(bvh_frames)} frames, {len(body_order)} bodies)")
 
     # Close progress bar
     pbar.close()

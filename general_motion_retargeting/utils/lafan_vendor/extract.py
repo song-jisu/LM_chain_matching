@@ -51,7 +51,7 @@ def read_bvh(filename, start=None, end=None, order=None):
     :return: A simple Anim object conatining the extracted information.
     """
 
-    f = open(filename, "r")
+    f = open(filename, "r", encoding="utf-8", errors="ignore")
 
     i = 0
     active = -1
