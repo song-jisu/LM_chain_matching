@@ -41,9 +41,12 @@ def load_bvh_file(bvh_file, format="lafan1"):
             
         frames.append(result)
     
-    # human_height = result["Head"][0][2] - min(result["LeftFootMod"][0][2], result["RightFootMod"][0][2])
-    # human_height = human_height + 0.2  # cm to m
-    human_height = 1.75  # cm to m
+    if format == "robot":
+        # robot BVH: 실제 높이 = 최고점 Z - 최저점 Z (첫 프레임 기준)
+        all_z = [result[b][0][2] for b in result]
+        human_height = max(all_z) - min(all_z) + 0.05
+    else:
+        human_height = 1.75
 
     # bone hierarchy 정보 (chain 추출용)
     bone_hierarchy = {

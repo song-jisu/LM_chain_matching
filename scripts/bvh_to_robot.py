@@ -174,14 +174,7 @@ if __name__ == "__main__":
             # human_pos_offset=np.array([0.0, 0.0, 0.0])
         )
 
-        if args.loop:
-            i = (i + 1) % len(lafan1_data_frames)
-        else:
-            i += 1
-            if i >= len(lafan1_data_frames):
-                break
-   
-        
+        # 데이터 수집 (break 전에 수행하여 마지막 프레임도 포함)
         if args.save_path is not None:
             qpos_list.append(qpos)
 
@@ -199,6 +192,13 @@ if __name__ == "__main__":
                     quat = Rot.from_matrix(xmat).as_quat(scalar_first=True)
                     frame[name] = (pos.tolist(), quat.tolist())
             bvh_frames.append(frame)
+
+        if args.loop:
+            i = (i + 1) % len(lafan1_data_frames)
+        else:
+            i += 1
+            if i >= len(lafan1_data_frames):
+                break
     
     if args.save_path is not None:
         import pickle
@@ -246,9 +246,21 @@ if __name__ == "__main__":
         root_bid = 1  # first non-world body
         frame_time = 1.0 / motion_fps
 
+        # Z-up (MuJoCo) → Y-up (BVH standard) coordinate transform
+        # T maps Y-up→Z-up: [[1,0,0],[0,0,-1],[0,1,0]]
+        # T_inv (Z-up→Y-up) = T^T: [[1,0,0],[0,0,1],[0,-1,0]]
+        # Position: [x,y,z]_zup → [x, z, -y]_yup
+        # Rotation: R_yup = T^T @ R_zup @ T
+        T = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])  # Y-up→Z-up
+        T_inv = T.T  # Z-up→Y-up
+
+        def pos_to_yup(p):
+            """Convert Z-up position to Y-up: [x, z, -y]"""
+            return np.array([p[0], p[2], -p[1]])
+
         def write_hierarchy(bid, depth=0):
             name = body_name(bid)
-            offset = model.body_pos[bid] * 100  # m → cm
+            offset = pos_to_yup(model.body_pos[bid]) * 100  # m → cm, Z-up → Y-up
             indent = "\t" * depth
             lines = []
             if depth == 0:
@@ -317,10 +329,14 @@ if __name__ == "__main__":
                 else:
                     r_local = Rot.from_quat(quat, scalar_first=True)
 
-                euler = r_local.as_euler('ZYX', degrees=True)  # BVH: ZYX order
+                # Convert local rotation from Z-up to Y-up frame
+                r_local_mat = r_local.as_matrix()
+                r_local_yup = T_inv @ r_local_mat @ T
+                euler = Rot.from_matrix(r_local_yup).as_euler('ZYX', degrees=True)
 
                 if bid == root_bid:
-                    vals.extend([pos[0]*100, pos[1]*100, pos[2]*100])  # cm
+                    pos_yup = pos_to_yup(pos) * 100  # Z-up → Y-up, m → cm
+                    vals.extend(pos_yup.tolist())
                     vals.extend(euler.tolist())
                 else:
                     vals.extend(euler.tolist())

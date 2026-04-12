@@ -431,6 +431,9 @@ class ChainMotionRetargeting:
         if not foot_z:
             return data
         lo = min(foot_z)
+        # 이미 지면 가까이 있으면 (|lo| < 5cm) 보정하지 않음
+        if abs(lo) < 0.05:
+            return data
         z = -lo + 0.01
         return {k: [v[0] + np.array([0, 0, z]), v[1]] for k, v in data.items()}
 

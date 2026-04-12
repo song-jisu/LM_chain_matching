@@ -20,6 +20,19 @@ def draw_frame(
     pos_offset=np.array([0, 0, 0]),
 ):
     rgba_list = [[1, 0, 0, 1], [0, 1, 0, 1], [0, 0, 1, 1]]
+    
+    # Add a sphere at the joint position
+    sphere_geom = v.user_scn.geoms[v.user_scn.ngeom]
+    mj.mjv_initGeom(
+        sphere_geom,
+        type=mj.mjtGeom.mjGEOM_SPHERE,
+        size=[0.02, 0.02, 0.02],
+        pos=pos + pos_offset,
+        mat=np.eye(3).flatten(),
+        rgba=[1, 1, 0, 0.8], # Yellow sphere
+    )
+    v.user_scn.ngeom += 1
+
     for i in range(3):
         geom = v.user_scn.geoms[v.user_scn.ngeom]
         mj.mjv_initGeom(
@@ -117,9 +130,13 @@ class RobotMotionViewer:
         else, the motion will be visualized as fast as possible.
         """
         
-        self.data.qpos[:3] = root_pos
-        self.data.qpos[3:7] = root_rot # quat need to be scalar first! for mujoco
-        self.data.qpos[7:] = dof_pos
+        has_freejoint = self.model.njnt > 0 and self.model.jnt_type[0] == 0
+        if has_freejoint:
+            self.data.qpos[:3] = root_pos
+            self.data.qpos[3:7] = root_rot # quat need to be scalar first! for mujoco
+            self.data.qpos[7:] = dof_pos
+        else:
+            self.data.qpos[:] = dof_pos
         
         mj.mj_forward(self.model, self.data)
         

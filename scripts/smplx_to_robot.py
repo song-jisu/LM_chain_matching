@@ -33,7 +33,7 @@ if __name__ == "__main__":
         choices=["unitree_g1", "unitree_g1_with_hands", "unitree_h1", "unitree_h1_2",
                  "booster_t1", "booster_t1_29dof","stanford_toddy", "fourier_n1", 
                 "engineai_pm01", "kuavo_s45", "hightorque_hi", "galaxea_r1pro", "berkeley_humanoid_lite", "booster_k1",
-                "pnd_adam_lite", "openloong", "tienkung", "fourier_gr3"],
+                "pnd_adam_lite", "openloong", "tienkung", "fourier_gr3", "hopejr_go2", "hopejr_humanoid"],
         default="unitree_g1",
     )
     
@@ -64,6 +64,13 @@ if __name__ == "__main__":
         help="Limit the rate of the retargeted robot motion to keep the same as the human motion.",
     )
 
+    parser.add_argument(
+        "--transparent",
+        default=False,
+        action="store_true",
+        help="Make the robot transparent to see the human model.",
+    )
+
     args = parser.parse_args()
 
 
@@ -89,7 +96,7 @@ if __name__ == "__main__":
     
     robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,
                                             motion_fps=aligned_fps,
-                                            transparent_robot=0,
+                                            transparent_robot=args.transparent,
                                             record_video=args.record_video,
                                             video_path=f"videos/{args.robot}_{args.smplx_file.split('/')[-1].split('.')[0]}.mp4",)
     
@@ -132,14 +139,24 @@ if __name__ == "__main__":
         # retarget
         qpos = retarget.retarget(smplx_data)
 
+        # Calculate visual offset to align human model with robot root
+        # Get the actual world position of the robot base
+        r_pos = qpos[:3]
+        if not has_freejoint:
+            r_pos = np.array([0.0, 0.0, 0.27])
+        
+        human_root_pos = retarget.scaled_human_data[retarget.human_root_name][0]
+        
+        # Place human 0.5m to the left (+Y) of the robot for clear comparison
+        visual_offset = r_pos - human_root_pos + np.array([0.0, 0.5, 0.0])
+
         # visualize
         robot_motion_viewer.step(
-            root_pos=qpos[:3],
-            root_rot=qpos[3:7],
-            dof_pos=qpos[7:],
+            root_pos=r_pos,
+            root_rot=qpos[3:7] if has_freejoint else np.array([1.0, 0.0, 0.0, 0.0]),
+            dof_pos=qpos[7:] if has_freejoint else qpos,
             human_motion_data=retarget.scaled_human_data,
-            # human_motion_data=smplx_data,
-            human_pos_offset=np.array([0.0, 0.0, 0.0]),
+            human_pos_offset=visual_offset,
             show_human_body_name=False,
             rate_limit=args.rate_limit,
             follow_camera=False,
