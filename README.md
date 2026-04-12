@@ -347,9 +347,11 @@ By default there is no visualization for batch retargeting.
 
 
 
-## Retargeting from BVH (Xsens) to Robot
+## Retargeting from Xsens to Robot
 
-#### Visualize bvh data using mujoco:
+### Offline: Xsens BVH to Robot
+
+#### Visualize Xsens BVH Data using MuJoCo
 
 Install PyQt6:
 ```bash
@@ -420,7 +422,62 @@ python scripts/xsens_bvh_to_robot.py  \
 - `--bvh_format` is used to set the format of the bvh being parsed. In the Xsens MVN software, BVH files in three formats can be exported. There will be some differences among BVH files in different formats. Here I recommend using the 3D Studio Max format.(In fact, I have not yet completed the parsing of data in other formats.)
 
 - The exported pkl file will represent quaternions in the `wxyz` format. ^ _ ^
-  
+
+---
+
+### Online Streaming (Xsens MVN)
+
+Stream live motion data from **Xsens MVN Software** directly into GMR for real-time robot retargeting.
+
+#### 1. Install the Xsens MVN UDP Data Parser
+
+The `xsens_mvn_robot_python` library parses the Xsens MVN network datagram (Position + Orientation in quaternion format) into Python-accessible data structures. Install the correct `.whl` file for your Python version.
+
+```bash
+# Clone the parser repository
+git clone https://github.com/jiminghe/xsens_mvn_robot_python.git
+cd xsens_mvn_robot_python
+
+# Install the matching wheel for your Python version
+# Example for Python 3.10:
+pip install xsens_mvn_robot_python-*-cp310-*.whl
+```
+
+> Select the `.whl` file whose filename contains your Python version tag (e.g. `cp310` for Python 3.10, `cp38` for Python 3.8). This library handles UDP socket binding and datagram unpacking automatically.
+
+#### 2. Configure the Xsens MVN Network Streamer
+
+Launch **Xsens MVN Software** on either Windows or Linux. You can stream from a live recording session while wearing the Xsens Link / Awinda suit, or replay a previously recorded `.mvn` file.
+
+| Step | Action |
+|---|---|
+| 1 | Click **Options → Network Streamer** |
+| 2 | In the pop-up window, click **Add** to create a new stream destination |
+| 3 | Set the **Host Address** (see table below) |
+| 4 | Under Network Streamer Options, tick **Position + Orientation (Quaternion)** only |
+| 5 | No other data sources are needed for GMR retargeting |
+| 6 | Click **OK** — confirm green status on the streamer |
+
+**Host Address Reference:**
+
+| Scenario | Host Address Setting |
+|---|---|
+| MVN on the same Linux machine (MVN Linux) | `127.0.0.1` (localhost) |
+| MVN on Windows → streaming to Ubuntu (same LAN) | Ubuntu IP address, e.g. `192.168.1.10` |
+
+> **Important:** When streaming from a Windows PC to an Ubuntu computer, ensure both machines are on the same LAN. Disable Windows Firewall for the MVN application or create an inbound UDP rule on the MVN default port (`9763`).
+
+#### 3. Run the GMR Live Streaming Script
+
+With the Xsens MVN Network Streamer active and the conda environment loaded, run the live-streaming retargeting script. A MuJoCo window will open showing the retargeted Unitree G1 robot mirroring your movements in real time.
+
+```bash
+# Activate the GMR environment
+conda activate gmr
+
+# Run the Xsens live streaming retargeting script
+python scripts/xsens_live_streaming.py
+```
 
 ### Retargeting from FBX (OptiTrack) to Robot
 

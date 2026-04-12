@@ -156,7 +156,7 @@ if __name__ == "__main__":
 
             # Retarget
             try:
-                qpos = retargeter.retarget(human_frame, offset_to_ground=True)
+                qpos = retargeter.retarget(human_frame, offset_to_ground=False)
             except Exception as e:
                 print(f"Retargeting failed: {e}")
                 dropped_frames += 1
@@ -172,7 +172,7 @@ if __name__ == "__main__":
                 dof_pos=qpos[7:],
                 human_motion_data=retargeter.scaled_human_data,
                 rate_limit=args.rate_limit,
-                follow_camera=False,
+                follow_camera=True,
             )
 
             if args.save_dir is not None:
