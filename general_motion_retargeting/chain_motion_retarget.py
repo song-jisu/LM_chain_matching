@@ -124,32 +124,128 @@ class ChainMotionRetargeting:
     # ==================================================================
 
     def _load_mapping(self, src_human, tgt_robot, actual_human_height):
+        """IK config가 있으면 자동 로드, 없으면 나중에 CLI matching."""
+        self.human_root_name = None
+        self.human_scale_table = {}
+        self.root_chain_indices = []  # root yaw 결정에 사용할 chain 인덱스
+        self._mapping_ready = False
+
         try:
             with open(IK_CONFIG_DICT[src_human][tgt_robot]) as f:
                 config = json.load(f)
+
+            self.human_root_name = config.get("human_root_name", "Hips")
+            self.human_scale_table = config.get("human_scale_table", {})
+
+            if actual_human_height is not None:
+                ratio = actual_human_height / config.get("human_height_assumption", 1.8)
+                for k in self.human_scale_table:
+                    self.human_scale_table[k] *= ratio
+
+            robot_to_human = {}
+            for table_key in ["ik_match_table1", "ik_match_table2"]:
+                for rname, entry in config.get(table_key, {}).items():
+                    if rname not in robot_to_human:
+                        robot_to_human[rname] = entry[0]
+
+            for chain in self.chains:
+                for i, bid in enumerate(chain['body_ids']):
+                    bname = self.body_id2name[bid]
+                    chain['human_bodies'][i] = robot_to_human.get(bname)
+
+            # root chains: 다리 chain 자동 감지 (hip/leg/thigh 포함)
+            for ci, ch in enumerate(self.chains):
+                if any(kw in ch['name'].lower() for kw in ['hip', 'leg', 'thigh']):
+                    self.root_chain_indices.append(ci)
+            if not self.root_chain_indices:
+                self.root_chain_indices = [0, 1] if len(self.chains) >= 2 else [0]
+
+            self._mapping_ready = True
+
         except (KeyError, FileNotFoundError):
-            self.human_root_name = "Hips"
-            self.human_scale_table = {}
-            return
+            pass  # CLI matching 필요
 
-        self.human_root_name = config.get("human_root_name", "Hips")
-        self.human_scale_table = config.get("human_scale_table", {})
+    def setup_cli_matching(self, source_bones):
+        """CLI로 source↔target chain 매칭 + root chain 선택.
+        source_bones: source BVH의 bone name 리스트
+        """
+        # Source chain 추출 (BVH bone hierarchy에서)
+        # 간단히: source_bones를 그대로 사용
+        print(f"\n{'='*60}")
+        print(f"  Chain Matching Setup")
+        print(f"{'='*60}")
 
-        if actual_human_height is not None:
-            ratio = actual_human_height / config.get("human_height_assumption", 1.8)
-            for k in self.human_scale_table:
-                self.human_scale_table[k] *= ratio
+        print(f"\n  Source bones: {source_bones[:10]}{'...' if len(source_bones)>10 else ''}")
+        print(f"\n  Target robot chains:")
+        for ci, ch in enumerate(self.chains):
+            bodies = [self.body_id2name[b] for b in ch['body_ids']]
+            print(f"    [{ci}] {ch['name']} ({len(bodies)} bodies)")
+            print(f"        bodies: {bodies}")
 
-        robot_to_human = {}
-        for table_key in ["ik_match_table1", "ik_match_table2"]:
-            for rname, entry in config.get(table_key, {}).items():
-                if rname not in robot_to_human:
-                    robot_to_human[rname] = entry[0]
+        # 각 target chain의 body를 source bone에 매핑
+        print(f"\n  For each target chain, enter matching source bone names.")
+        print(f"  Format: target_body=source_bone (comma separated)")
+        print(f"  Enter 'skip' to skip a chain.\n")
 
-        for chain in self.chains:
-            for i, bid in enumerate(chain['body_ids']):
+        for ci, ch in enumerate(self.chains):
+            print(f"  Chain [{ci}] {ch['name']}:")
+            for bi, bid in enumerate(ch['body_ids']):
                 bname = self.body_id2name[bid]
-                chain['human_bodies'][i] = robot_to_human.get(bname)
+                print(f"    [{bi}] {bname}")
+
+            user = input(f"  Mapping (e.g. 0=Hips,2=LeftUpLeg,3=LeftLeg) or 'skip': ").strip()
+            if user.lower() == 'skip':
+                continue
+
+            for pair in user.split(','):
+                pair = pair.strip()
+                if '=' not in pair:
+                    continue
+                parts = pair.split('=')
+                try:
+                    body_idx = int(parts[0].strip())
+                    src_bone = parts[1].strip()
+                    if src_bone in source_bones and body_idx < len(ch['body_ids']):
+                        ch['human_bodies'][body_idx] = src_bone
+                except (ValueError, IndexError):
+                    print(f"    Invalid: {pair}")
+
+            mapped = [(bi, hb) for bi, hb in enumerate(ch['human_bodies']) if hb]
+            print(f"    -> {len(mapped)} mapped: {[(bi, hb) for bi, hb in mapped]}")
+
+        # Root chain 선택
+        print(f"\n  Select root chains (for pelvis yaw calculation).")
+        print(f"  These should be 'leg' chains whose start positions define body orientation.")
+        root_input = input(f"  Root chain indices (comma separated, e.g. 0,1): ").strip()
+        try:
+            self.root_chain_indices = [int(x.strip()) for x in root_input.split(',')]
+        except ValueError:
+            self.root_chain_indices = [0, 1] if len(self.chains) >= 2 else [0]
+        print(f"    -> Root chains: {self.root_chain_indices}")
+
+        # Human root name: 첫 root chain의 첫 mapped body
+        for ri in self.root_chain_indices:
+            mapped = [hb for hb in self.chains[ri]['human_bodies'] if hb]
+            if mapped:
+                self.human_root_name = mapped[0]
+                break
+        if not self.human_root_name:
+            self.human_root_name = source_bones[0] if source_bones else "root"
+
+        # Scale table: 모든 mapped body에 대해 기본 scale 1.0
+        for ch in self.chains:
+            for hb in ch['human_bodies']:
+                if hb and hb not in self.human_scale_table:
+                    self.human_scale_table[hb] = 1.0
+        if self.human_root_name not in self.human_scale_table:
+            self.human_scale_table[self.human_root_name] = 1.0
+
+        self._mapping_ready = True
+
+        print(f"\n  Human root: {self.human_root_name}")
+        print(f"  Root chains: {self.root_chain_indices}")
+        print(f"  Mapping complete!")
+        print(f"{'='*60}\n")
 
     # ==================================================================
     # Rest pose 계산
@@ -228,11 +324,49 @@ class ChainMotionRetargeting:
         return result
 
     def _ground(self, data):
-        lo = min((data[b][0][2] for b in data if "Foot" in b or "foot" in b), default=np.inf)
-        if lo == np.inf:
+        # root chain의 끝 body 또는 Foot/foot 이름으로 바닥 감지
+        foot_z = []
+        for b in data:
+            if "Foot" in b or "foot" in b or "ankle" in b or "toe" in b:
+                foot_z.append(data[b][0][2])
+        # root chain 끝 body도 확인
+        for ri in self.root_chain_indices:
+            if ri < len(self.chains):
+                ch = self.chains[ri]
+                mapped = [hb for hb in ch['human_bodies'] if hb and hb in data]
+                if mapped:
+                    foot_z.append(data[mapped[-1]][0][2])
+        if not foot_z:
             return data
+        lo = min(foot_z)
         z = -lo + 0.01
         return {k: [v[0] + np.array([0, 0, z]), v[1]] for k, v in data.items()}
+
+    def _compute_forward_from_root_chains(self, human_data):
+        """root chain들의 첫 mapped body 위치에서 forward 방향 계산."""
+        root_pos = np.asarray(human_data[self.human_root_name][0])
+        anchor_positions = []
+
+        for ri in self.root_chain_indices:
+            if ri >= len(self.chains):
+                continue
+            ch = self.chains[ri]
+            mapped = [hb for hb in ch['human_bodies'] if hb and hb in human_data]
+            if mapped:
+                anchor_positions.append(np.asarray(human_data[mapped[0]][0]))
+
+        if len(anchor_positions) >= 2:
+            lr = anchor_positions[0] - anchor_positions[1]
+            fwd = np.cross(lr, [0, 0, 1])
+            fwd[2] = 0
+            fn = np.linalg.norm(fwd)
+            if fn > 1e-6:
+                fwd = fwd / fn
+                yaw = np.arctan2(fwd[1], fwd[0])
+                self._fwd_rotation = R.from_euler("z", -yaw)
+                return
+
+        self._compute_forward_rotation(human_data)
 
     def _compute_forward_rotation(self, human_data):
         """BVH forward 방향을 자동 추정하고 +X로 맞추는 rotation 계산.
@@ -277,13 +411,14 @@ class ChainMotionRetargeting:
         human_data = {k: [np.asarray(v[0]), np.asarray(v[1])]
                       for k, v in human_data.items()}
 
-        # 첫 프레임에서 forward rotation 계산
-        if not hasattr(self, '_fwd_rotation'):
-            self._compute_forward_rotation(human_data)
+        # 매핑이 안 되어 있으면 CLI matching 호출
+        if not self._mapping_ready:
+            source_bones = list(human_data.keys())
+            self.setup_cli_matching(source_bones)
 
-        # forward rotation (첫 프레임)
-        if not hasattr(self, "_fwd_rotation"):
-            self._compute_forward_rotation(human_data)
+        # forward detection (첫 프레임) — root chain의 시작 body로 계산
+        if not hasattr(self, '_fwd_rotation'):
+            self._compute_forward_from_root_chains(human_data)
 
         if not self._rest_computed:
             aligned = self._align_human_data(human_data)

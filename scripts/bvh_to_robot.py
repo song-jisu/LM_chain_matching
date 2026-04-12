@@ -104,7 +104,7 @@ if __name__ == "__main__":
     # Initialize the retargeting system
     if args.method == "chain":
         retargeter = ChainMotionRetargeting(
-            src_human=f"bvh_{args.format}",
+            src_human=f"bvh_{args.format}" if args.format != "robot" else "robot",
             tgt_robot=args.robot,
             actual_human_height=actual_human_height,
         )
