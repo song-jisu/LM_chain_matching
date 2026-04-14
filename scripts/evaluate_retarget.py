@@ -127,7 +127,7 @@ def evaluate_single(bvh_file, format_type, robot, method, max_frames=None):
             src_human=f"bvh_{format_type}",
             tgt_robot=robot,
             actual_human_height=human_height,
-            solver="proxqp",
+            solver="daqp",
             verbose=False,
         )
 

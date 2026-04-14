@@ -272,25 +272,60 @@ class ChainMotionRetargeting:
             print(f"    [T{ci}] {ch['name']} ({len(bodies)} bodies)")
             print(f"         {bodies}")
 
-        # Chain ↔ Chain 매칭
-        print(f"\n  Match source chain → target chain.")
-        print(f"  Format: S0->T0, S1->T1, ...")
-        print(f"  Body mapping is automatic (by position order).\n")
+        # Chain ↔ Chain 매칭 (개별 지정, 그룹 자동 파생)
+        print(f"\n  Match source chain -> target chain.")
+        print(f"  Format: 0->0 0->2 1->1 1->3 4->4  (space-separated)")
+        print(f"  Same source -> auto-grouped.\n")
 
-        match_input = input(f"  Chain matching (e.g. 0->0,1->1,2->2): ").strip()
+        match_input = input(f"  Chain matching: ").strip()
 
-        chain_pairs = []  # (src_chain_idx, tgt_chain_idx)
-        for pair in match_input.split(','):
-            pair = pair.strip().replace('S', '').replace('T', '')
-            if '->' not in pair:
+        # 파싱: 공백으로 구분, 각 항목은 "S->T" 형식
+        chain_pairs = []
+        for pair_str in match_input.split():
+            pair_str = pair_str.strip().replace('S', '').replace('T', '')
+            if '->' not in pair_str:
                 continue
-            parts = pair.split('->')
+            parts = pair_str.split('->')
             try:
                 si = int(parts[0].strip())
                 ti = int(parts[1].strip())
                 chain_pairs.append((si, ti))
             except (ValueError, IndexError):
-                print(f"    Invalid: {pair}")
+                print(f"    Invalid: {pair_str}")
+
+        # 같은 source index를 공유하는 target들을 자동 그룹화
+        from collections import defaultdict
+        src_to_tgts = defaultdict(list)
+        for si, ti in chain_pairs:
+            if ti not in src_to_tgts[si]:
+                src_to_tgts[si].append(ti)
+
+        # 같은 target set을 공유하지 않더라도, 같은 source를 가진 chains를 묶기
+        # 더 나아가: 같은 target을 공유하는 source끼리도 묶기
+        # 여기서는 단순히 source별 target list를 그룹으로
+        self._chain_groups = []
+        used_sources = set()
+        for si in sorted(src_to_tgts.keys()):
+            if si in used_sources:
+                continue
+            tgt_list = src_to_tgts[si]
+            # 이 target들에 매핑된 다른 source도 같은 그룹에 포함
+            group_src = {si}
+            for other_si, other_tgts in src_to_tgts.items():
+                if other_si != si and set(other_tgts) & set(tgt_list):
+                    group_src.add(other_si)
+            # 그룹의 모든 source가 가진 모든 target 통합
+            group_tgt = set()
+            for gs in group_src:
+                group_tgt.update(src_to_tgts[gs])
+                used_sources.add(gs)
+            self._chain_groups.append({
+                'src_indices': sorted(group_src),
+                'tgt_indices': sorted(group_tgt),
+            })
+
+        for g in self._chain_groups:
+            print(f"    Auto-group: S{g['src_indices']} -> T{g['tgt_indices']}")
 
         # 매칭된 chain 쌍의 body를 순서대로 대응
         for si, ti in chain_pairs:
@@ -354,7 +389,169 @@ class ChainMotionRetargeting:
             mapped = [(bi, hb) for bi, hb in enumerate(ch['human_bodies']) if hb]
             if mapped:
                 print(f"  T[{ci}] {ch['name']}: {mapped}")
+        if hasattr(self, '_chain_groups') and self._chain_groups:
+            print(f"  Groups: {len(self._chain_groups)}")
+            for gi, g in enumerate(self._chain_groups):
+                print(f"    G{gi}: S{g['src_indices']} -> T{g['tgt_indices']}")
         print(f"  {'='*40}\n")
+
+    # ==================================================================
+    # Group topology 계산
+    # ==================================================================
+
+    def _compute_group_topology(self, human_data):
+        """그룹별로 source→target chain 시작점 배치의 보간 가중치 계산.
+
+        각 target chain의 목표 위치 = source chains의 endpoint 가중 보간.
+        가중치는 rest pose에서의 상대 위치로 결정.
+        """
+        if not hasattr(self, '_chain_groups') or not self._chain_groups:
+            return
+
+        # Target rest pose
+        data_tmp = mj.MjData(self.model)
+        data_tmp.qpos[:] = self._init_qpos
+        mj.mj_forward(self.model, data_tmp)
+        tgt_root_pos = data_tmp.xpos[self.body_name2id.get('pelvis',
+                                     self.body_name2id.get('base_link', 1))].copy()
+
+        # Source rest pose (첫 프레임에서)
+        src_root_pos = np.asarray(human_data[self.human_root_name][0])
+
+        for group in self._chain_groups:
+            src_ids = group['src_indices']
+            tgt_ids = group['tgt_indices']
+
+            if len(src_ids) == 0 or len(tgt_ids) == 0:
+                group['weights'] = []
+                continue
+
+            # Source chain 시작점들 (rest, root-relative)
+            src_starts = []
+            src_chain_list = self._extract_source_chains(
+                list(human_data.keys()), human_data) if not hasattr(self, '_src_chains_cache') else self._src_chains_cache
+            self._src_chains_cache = src_chain_list
+
+            for si in src_ids:
+                if si < len(src_chain_list) and src_chain_list[si]:
+                    bone = src_chain_list[si][0]
+                    if bone in human_data:
+                        pos = np.asarray(human_data[bone][0]) - src_root_pos
+                        src_starts.append(pos)
+                    else:
+                        src_starts.append(np.zeros(3))
+                else:
+                    src_starts.append(np.zeros(3))
+            src_starts = np.array(src_starts)  # (M, 3)
+
+            # Target chain 시작점들 (rest, root-relative)
+            tgt_starts = []
+            for ti in tgt_ids:
+                if ti < len(self.chains):
+                    bid = self.chains[ti]['body_ids'][0]
+                    pos = data_tmp.xpos[bid] - tgt_root_pos
+                    tgt_starts.append(pos)
+                else:
+                    tgt_starts.append(np.zeros(3))
+            tgt_starts = np.array(tgt_starts)  # (N, 3)
+
+            # 각 target chain에 대해 source chains의 보간 가중치 계산
+            # Centroid-relative 방향 유사도 (cosine similarity → softmax)
+            src_centroid = src_starts.mean(axis=0)
+            tgt_centroid = tgt_starts.mean(axis=0)
+            src_rel = src_starts - src_centroid
+            tgt_rel = tgt_starts - tgt_centroid
+            src_norms = np.linalg.norm(src_rel, axis=1, keepdims=True)
+            tgt_norms = np.linalg.norm(tgt_rel, axis=1, keepdims=True)
+            src_dirs = src_rel / np.maximum(src_norms, 1e-6)
+            tgt_dirs = tgt_rel / np.maximum(tgt_norms, 1e-6)
+
+            weights_list = []
+            sigma = 0.5  # softmax temperature
+            for j in range(len(tgt_ids)):
+                cos_sims = tgt_dirs[j] @ src_dirs.T  # (M,)
+                # softmax: 높은 cosine similarity → 높은 가중치
+                w = np.exp(cos_sims / sigma)
+                w = w / w.sum()
+                weights_list.append(w)
+
+            group['weights'] = weights_list
+            group['src_starts_rest'] = src_starts
+            group['tgt_starts_rest'] = tgt_starts
+
+            print(f"  [Topology] Group S{src_ids}->T{tgt_ids} (direction-based)")
+            for j, ti in enumerate(tgt_ids):
+                w_str = ', '.join(f'S{src_ids[k]}:{weights_list[j][k]:.2f}'
+                                  for k in range(len(src_ids)))
+                cos_str = ', '.join(f'{tgt_dirs[j] @ src_dirs[k]:.2f}'
+                                    for k in range(len(src_ids)))
+                print(f"    T{ti}: weights=[{w_str}] cos=[{cos_str}]")
+
+        self._group_topology_computed = True
+
+    def _apply_group_topology(self, scaled, chain_idx):
+        """그룹 topology 가중치로 target chain의 목표 위치를 보간 생성.
+
+        Returns:
+            transformed_positions: dict {body_name: new_position} 또는 None
+        """
+        if not hasattr(self, '_group_topology_computed') or not self._group_topology_computed:
+            return None
+        if not hasattr(self, '_chain_groups'):
+            return None
+
+        # 이 chain이 속한 그룹 찾기
+        for group in self._chain_groups:
+            if chain_idx not in group['tgt_indices']:
+                continue
+            if not group.get('weights'):
+                continue
+
+            j = group['tgt_indices'].index(chain_idx)
+            weights = group['weights'][j]
+            src_ids = group['src_indices']
+
+            # 1:1 그룹이면 변환 불필요
+            if len(src_ids) == 1 and len(group['tgt_indices']) == 1:
+                return None
+
+            # Source chain들의 현재 프레임 mapped body positions 수집
+            src_chain_list = self._src_chains_cache if hasattr(self, '_src_chains_cache') else []
+            src_root = np.asarray(scaled[self.human_root_name][0])
+
+            src_endpoints = {}  # src_idx -> {bone_name: position}
+            for si in src_ids:
+                if si < len(src_chain_list):
+                    src_endpoints[si] = {}
+                    for bone in src_chain_list[si]:
+                        if bone in scaled:
+                            src_endpoints[si][bone] = np.asarray(scaled[bone][0])
+
+            # Target chain의 mapped bodies
+            ch = self.chains[chain_idx]
+            mapped = [(bi, hb) for bi, hb in enumerate(ch['human_bodies'])
+                      if hb and hb in scaled]
+            if not mapped:
+                return None
+
+            # 각 mapped body의 목표 위치 = source chains의 대응 body 가중 보간
+            result = {}
+            for bi, hb in mapped:
+                # 각 source chain에서 대응하는 body position 찾기
+                interp_pos = np.zeros(3)
+                for k, si in enumerate(src_ids):
+                    if si in src_endpoints and hb in src_endpoints[si]:
+                        interp_pos += weights[k] * src_endpoints[si][hb]
+                    elif si in src_endpoints:
+                        # hb가 이 source chain에 없으면 가장 가까운 body 사용
+                        bones = list(src_endpoints[si].values())
+                        if bones:
+                            interp_pos += weights[k] * bones[-1]  # last body (endpoint)
+                result[hb] = interp_pos
+
+            return result
+
+        return None
 
     # ==================================================================
     # Rest pose 계산
@@ -411,6 +608,27 @@ class ChainMotionRetargeting:
 
             self._link_dir_rots[chain['name']] = rots
             self._robot_link_lens[chain['name']] = lens
+
+            # Chain별 길이 비율: 자동 계산 (IK config 불필요)
+            # target: chain 전체 body (end-effector 포함) 길이
+            all_bids = chain['body_ids']
+            tgt_total = 0.0
+            for k in range(len(all_bids) - 1):
+                tgt_total += np.linalg.norm(
+                    data_tmp.xpos[all_bids[k+1]] - data_tmp.xpos[all_bids[k]])
+            tgt_total = max(tgt_total, 1e-6)
+            # source: mapped body 간 길이
+            src_total = 0.0
+            for k in range(len(mapped) - 1):
+                bi1, hb1 = mapped[k]
+                bi2, hb2 = mapped[k + 1]
+                sp1 = np.asarray(human_data[hb1][0])
+                sp2 = np.asarray(human_data[hb2][0])
+                src_total += np.linalg.norm(sp2 - sp1)
+            chain_scale = tgt_total / max(src_total, 1e-6)
+            for _, hb in mapped:
+                if hb in self.human_scale_table:
+                    self.human_scale_table[hb] = chain_scale
 
         self._rest_computed = True
 
@@ -535,6 +753,10 @@ class ChainMotionRetargeting:
             aligned = self._align_human_data(human_data)
             self._compute_rest(aligned)
 
+        # Group topology (첫 프레임에서 한 번만)
+        if not hasattr(self, '_group_topology_computed') or not self._group_topology_computed:
+            self._compute_group_topology(human_data)
+
         # 시각화용: 원본 BVH (회전 안 함)
         scaled_viz = self._scale(human_data)
         scaled_viz = self._ground(scaled_viz)
@@ -592,13 +814,23 @@ class ChainMotionRetargeting:
 
         # Step 1: root yaw + waist joints로 모든 chain 시작점 위치 맞추기
         # 각 chain의 첫 mapped body 위치를 타겟으로, root yaw + waist를 최적화
+        # Anchor targets: target robot의 rest-pose 상대 배치를 현재 root에 맞춤
+        # source 절대 위치가 아니라, robot 구조(XML) 기반
         anchor_targets = []
+        use_rest_anchors = hasattr(self, '_chain_groups') and bool(self._chain_groups)
+        src_root_pos = np.asarray(scaled[self.human_root_name][0]) if self.human_root_name in scaled else qpos[:3]
         for ch in self.chains:
             mapped = [(bi, hb) for bi, hb in enumerate(ch['human_bodies'])
                       if hb and hb in scaled]
             if mapped:
                 bi0, hb0 = mapped[0]
-                anchor_targets.append((ch['body_ids'][bi0], np.asarray(scaled[hb0][0])))
+                cname = ch['name']
+                if use_rest_anchors and cname in self._tgt_rest_anchors:
+                    rest_offset = self._tgt_rest_anchors[cname]
+                    anchor_pos = src_root_pos + rest_offset
+                    anchor_targets.append((ch['body_ids'][bi0], anchor_pos))
+                else:
+                    anchor_targets.append((ch['body_ids'][bi0], np.asarray(scaled[hb0][0])))
 
         if anchor_targets:
             anchor_bids = [a[0] for a in anchor_targets]
@@ -689,15 +921,35 @@ class ChainMotionRetargeting:
                 continue
 
             target_bids = [ch['body_ids'][bi] for bi, _ in mapped]
-            target_pos_list = [np.asarray(scaled[hb][0]) for _, hb in mapped]
+
+            # Target positions: chain 시작점 기준 상대 shape로 구성
+            # source chain의 shape을 target chain 시작점에 붙임
+            use_cross_morph = hasattr(self, '_chain_groups') and bool(self._chain_groups)
+
+            if use_cross_morph:
+                src_positions = [np.asarray(scaled[hb][0]) for _, hb in mapped]
+                src_chain_start = src_positions[0]
+                tgt_chain_start = self.data.xpos[ch['body_ids'][mapped[0][0]]].copy()
+                chain_scale = self.human_scale_table.get(mapped[0][1], 1.0)
+                target_pos_list = []
+                for mi, (bi, hb) in enumerate(mapped):
+                    relative = np.asarray(scaled[hb][0]) - src_chain_start
+                    target_pos_list.append(tgt_chain_start + relative * chain_scale)
+                chain_idx = self.chains.index(ch)
+                topo_result = self._apply_group_topology(scaled, chain_idx)
+                if topo_result is not None:
+                    for mi, (bi, hb) in enumerate(mapped):
+                        if hb in topo_result:
+                            relative = topo_result[hb] - src_chain_start
+                            target_pos_list[mi] = tgt_chain_start + relative * chain_scale
+            else:
+                target_pos_list = [np.asarray(scaled[hb][0]) for _, hb in mapped]
 
             # chain 시작 body anchor 타겟 추가
             first_bid = ch['body_ids'][0]
             if first_bid not in target_bids:
                 target_bids.insert(0, first_bid)
                 target_pos_list.insert(0, target_pos_list[0].copy())
-
-            # (자식 chain 시작점은 Step 1에서 이미 맞춰짐)
 
             target_pos = np.array(target_pos_list)
             n_targets = len(target_bids)
