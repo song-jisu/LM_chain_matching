@@ -5,10 +5,10 @@ NN이 joint angles 초기값 예측 → chain_motion_retarget의 LM에 warm star
 LM iteration이 줄어들어 빠르면서도 Step 1(root yaw) + waist 포함.
 
 Usage:
-  python chain_flow/retarget_hybrid.py \
+  python chain_nn/retarget_hybrid.py \
     --bvh_file <input.bvh> --format lafan1 --robot unitree_g1 \
-    --ckpt chain_flow/checkpoints/direct_ik_best.pt \
-    --meta chain_flow/data/ik_data.pkl \
+    --ckpt chain_nn/checkpoints/direct_ik_best.pt \
+    --meta chain_nn/data/ik_data.pkl \
     --lm_steps 5 --visualize --loop
 """
 
@@ -24,8 +24,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from chain_flow.chain_shape import normalize_chain_shape, K_POINTS
-from chain_flow.direct_model import DirectChainIK, MAX_JOINTS
+from common.chain_shape import normalize_chain_shape, K_POINTS
+from chain_nn.direct_model import DirectChainIK, MAX_JOINTS
 
 
 def main():
@@ -34,7 +34,7 @@ def main():
     parser.add_argument("--format", default="lafan1")
     parser.add_argument("--robot", default="unitree_g1")
     parser.add_argument("--ckpt", required=True)
-    parser.add_argument("--meta", default="chain_flow/data/ik_data.pkl")
+    parser.add_argument("--meta", default="chain_nn/data/ik_data.pkl")
     parser.add_argument("--max_frames", type=int, default=None)
     parser.add_argument("--lm_steps", type=int, default=5,
                         help="Max LM iterations per chain (default 5, original uses 30)")

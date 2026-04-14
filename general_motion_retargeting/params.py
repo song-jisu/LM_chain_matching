@@ -23,7 +23,8 @@ ROBOT_XML_DICT = {
     "tienkung": ASSET_ROOT / "tienkung" / "mjcf" / "tienkung.xml",
     "pal_talos": ASSET_ROOT / "pal_talos" / "talos.xml",
     "fourier_gr3": ASSET_ROOT / "fourier_gr3v2_1_1" / "mjcf" / "gr3v2_1_1_dummy_hand.xml",
-    "hopejr_go2": ASSET_ROOT / "hopejr_go2" / "hopejr_go2_mocap.xml",
+    "hopejr_go2": ASSET_ROOT / "hopejr_go2" / "hopejr_go2.xml",
+    "hopejr_go2_mocap": ASSET_ROOT / "hopejr_go2" / "hopejr_go2_mocap.xml",
     "hopejr_humanoid": ASSET_ROOT / "hopejr_go2" / "hopejr_go2_humanoid.xml",
 }
 
@@ -103,6 +104,7 @@ ROBOT_BASE_DICT = {
     "pal_talos": "base_link",
     "fourier_gr3": "base_link",
     "hopejr_go2": "base_link",
+    "hopejr_go2_mocap": "base_link",
     "hopejr_humanoid": "base_link",
 }
 
@@ -126,5 +128,6 @@ VIEWER_CAM_DISTANCE_DICT = {
     "pal_talos": 3.0,
     "fourier_gr3": 2.0,
     "hopejr_go2": 1.5,
+    "hopejr_go2_mocap": 1.5,
     "hopejr_humanoid": 1.5,
 }
