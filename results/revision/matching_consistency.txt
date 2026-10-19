@@ -1,0 +1,47 @@
+unitree_g1: 1 distinct mappings over 77 files; knee>0: {True: 77}
+booster_t1_29dof: 1 distinct mappings over 77 files; knee>0: {True: 77}
+fourier_n1: 1 distinct mappings over 77 files; knee>0: {True: 77}
+engineai_pm01: 1 distinct mappings over 77 files; knee>0: {True: 77}
+stanford_toddy: 1 distinct mappings over 77 files; knee>0: {True: 77}
+unitree_h1: 1 distinct mappings over 77 files; knee>0: {True: 77}
+booster_k1: 1 distinct mappings over 77 files; knee>0: {True: 77}
+pal_talos: 1 distinct mappings over 77 files; knee>0: {True: 77}
+kuavo_s45: 1 distinct mappings over 77 files; knee>0: {True: 77}
+hightorque_hi: 1 distinct mappings over 77 files; knee>0: {True: 77}
+fourier_gr3: 1 distinct mappings over 77 files; knee>0: {True: 77}
+pnd_adam_lite: 1 distinct mappings over 77 files; knee>0: {True: 77}
+tienkung: 1 distinct mappings over 77 files; knee>0: {True: 77}
+berkeley_humanoid_lite: 6 distinct mappings over 77 files; knee>0: {True: 77}
+    aiming1_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLe
+    aiming2_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLe
+    dance1_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLeg
+    dance2_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLeg
+    dance2_subject4.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLeg
+    dance2_subject5.bvh [('leg_right_hip_roll->leg_right_ankle_roll', 'RightUpLeg..RightToe', 'RightUpLeg..RightToe', (('RightUpLeg', 'RightUpLeg'), ('RightUpLeg', 'RightLeg'), ('RightLeg', 'RightLeg'
+    fallAndGetUp1_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('
+    fallAndGetUp1_subject4.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('
+    fallAndGetUp1_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('
+    fight1_subject3.bvh [('leg_right_hip_roll->leg_right_ankle_roll', 'RightUpLeg..RightToe', 'RightUpLeg..RightToe', (('RightUpLeg', 'RightUpLeg'), ('RightUpLeg', 'RightLeg'), ('RightLeg', 'RightLeg'
+    fight1_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLeg
+    fightAndSports1_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), 
+    ground1_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLe
+    ground1_subject4.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLe
+    ground1_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLe
+    jumps1_subject5.bvh [('leg_right_hip_roll->leg_right_ankle_roll', 'RightUpLeg..RightToe', 'RightUpLeg..RightToe', (('RightUpLeg', 'RightUpLeg'), ('RightUpLeg', 'RightLeg'), ('RightLeg', 'RightLeg'
+    multipleActions1_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'),
+    obstacles1_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('Lef
+    obstacles2_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('Lef
+    obstacles3_subject4.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('Lef
+    obstacles4_subject4.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('Lef
+    obstacles5_subject4.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('Lef
+    obstacles6_subject4.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('Lef
+    obstacles6_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('Lef
+    pushAndStumble1_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), 
+    run1_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLeg',
+    run2_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLeg',
+    walk1_subject5.bvh [('leg_right_hip_roll->leg_right_ankle_roll', 'RightUpLeg..RightToe', 'RightUpLeg..RightToe', (('RightUpLeg', 'RightUpLeg'), ('RightUpLeg', 'RightLeg'), ('RightLeg', 'RightLeg')
+    walk2_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLeg'
+    walk3_subject5.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLeg'
+    walk4_subject1.bvh [('leg_left_hip_roll->leg_left_ankle_roll', 'LeftUpLeg..LeftToe', 'LeftUpLeg..LeftToe', (('LeftUpLeg', 'LeftUpLeg'), ('LeftUpLeg', 'LeftLeg'), ('LeftLeg', 'LeftLeg'), ('LeftLeg'
+unitree_h1_2: 1 distinct mappings over 77 files; knee>0: {True: 77}
+galaxea_r1pro: 1 distinct mappings over 77 files; knee>0: {True: 77}

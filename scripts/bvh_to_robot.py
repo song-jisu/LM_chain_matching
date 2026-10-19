@@ -2,7 +2,7 @@ import argparse
 import pathlib
 import time
 from general_motion_retargeting import GeneralMotionRetargeting as GMR
-from general_motion_retargeting import ChainMotionRetargeting
+from general_motion_retargeting import ChainMotionRetargeting, AutoChainRetargeting, ROBOT_XML_DICT
 from general_motion_retargeting import RobotMotionViewer
 from general_motion_retargeting.utils.lafan1 import load_bvh_file
 from rich import print
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     
     parser.add_argument(
         "--robot",
-        choices=["unitree_g1", "unitree_g1_with_hands", "booster_t1", "stanford_toddy", "fourier_n1", "engineai_pm01", "pal_talos", "hopejr_go2", "hopejr_humanoid"],
+        choices=sorted(ROBOT_XML_DICT.keys()),
         default="unitree_g1",
     )
     
@@ -80,9 +80,10 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--method",
-        choices=["ik", "chain"],
+        choices=["ik", "chain", "auto"],
         default="ik",
-        help="Retargeting method: 'ik' (GMR default) or 'chain' (chain-based)",
+        help="Retargeting method: 'ik' (GMR default), 'chain' (legacy chain LM), "
+             "'auto' (config-free chain LM)",
     )
 
     args = parser.parse_args()
@@ -102,7 +103,10 @@ if __name__ == "__main__":
     
     
     # Initialize the retargeting system
-    if args.method == "chain":
+    if args.method == "auto":
+        retargeter = AutoChainRetargeting(args.robot, verbose=True)
+        retargeter.prepare(lafan1_data_frames, bone_hierarchy)
+    elif args.method == "chain":
         retargeter = ChainMotionRetargeting(
             src_human=f"bvh_{args.format}" if args.format != "robot" else "robot",
             tgt_robot=args.robot,

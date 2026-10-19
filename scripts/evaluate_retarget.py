@@ -35,6 +35,7 @@ _pkg.ROBOT_BASE_DICT = ROBOT_BASE_DICT
 
 from general_motion_retargeting.motion_retarget import GeneralMotionRetargeting as GMR
 from general_motion_retargeting.chain_motion_retarget import ChainMotionRetargeting
+from general_motion_retargeting.auto_chain_retarget import AutoChainRetargeting
 from general_motion_retargeting.utils.lafan1 import load_bvh_file
 import mujoco as mj
 
@@ -79,7 +80,7 @@ def get_root_info(retargeter, method):
 
 def get_target_xpos(retargeter, method):
     """retarget 후 target body positions 반환."""
-    if method == "chain":
+    if method in ("chain", "auto"):
         return retargeter.data.xpos
     else:
         return retargeter.configuration.data.xpos
@@ -105,127 +106,210 @@ def compute_robot_height(retargeter, method):
     return max(all_z) - min(all_z)
 
 
-def evaluate_single(bvh_file, format_type, robot, method, max_frames=None):
+class CommonMetrics:
+    """모든 방법에 같은 기준을 적용하는 평가 지표.
+
+    정답 대응은 GMR IK 설정(bvh_lafan1_to_<robot>.json)의 위치 가중치>0 바디 대응을 쓴다.
+    이 대응은 평가에만 쓰이며 auto 방법의 리타게팅에는 쓰이지 않는다.
+      E_dir : 사지 분절(허벅지·정강이·위팔·아래팔) 방향 각도 오차 [deg]
+      E_cmp : 공통 균일 스케일(사지 길이 비) 기준 루트 상대 위치 오차 [m]
+      flip  : 무릎·팔꿈치 굽힘 법선이 소스와 반대(dot<0)인 프레임 비율
+    """
+
+    def __init__(self, robot, src_format, model, human_rest):
+        cfg_path = IK_CONFIG_DICT.get(f"bvh_{src_format}", {}).get(robot)
+        self.ok = cfg_path is not None and os.path.exists(cfg_path)
+        if not self.ok:
+            return
+        import json
+        cfg = json.load(open(cfg_path))
+        lm = {}
+        for t in ("ik_match_table1", "ik_match_table2"):
+            for rname, e in cfg.get(t, {}).items():
+                if e[1] > 0 or rname == cfg["robot_root_name"]:
+                    bid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, rname)
+                    if bid >= 0:
+                        lm[bid] = e[0]
+        self.lm = lm
+        self.root_bid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, cfg["robot_root_name"])
+        self.root_h = cfg["human_root_name"]
+
+        def anc(b):
+            b = int(model.body_parentid[b])
+            while b > 0 and b not in lm:
+                b = int(model.body_parentid[b])
+            return b if b in lm else None
+        parent = {b: anc(b) for b in lm}
+        kids = {b: [c for c in lm if parent[c] == b] for b in lm}
+        # 사지 분절: 부모 landmark가 허브(자식 landmark 2개 이상)가 아닌 분절
+        self.segs = [(parent[b], b) for b in lm if parent[b] is not None and len(kids[parent[b]]) == 1]
+        self.trip = [(parent[b], b, kids[b][0]) for b in lm
+                     if parent[b] is not None and len(kids[parent[b]]) == 1 and len(kids[b]) == 1]
+
+        d = mj.MjData(model)
+        mj.mj_forward(model, d)
+        rl = sum(np.linalg.norm(d.xpos[b] - d.xpos[a]) for a, b in self.segs)
+        hl = sum(np.linalg.norm(np.asarray(human_rest[lm[b]][0]) - np.asarray(human_rest[lm[a]][0]))
+                 for a, b in self.segs)
+        self.scale = rl / max(hl, 1e-9)
+        self.dvecs = []
+
+    def dynamic_error(self):
+        """랜드마크별 시간 평균 오프셋(바디 원점 위치 관례 차이)을 뺀 위치 오차."""
+        D = np.array(self.dvecs)
+        return float(np.mean(np.linalg.norm(D - D.mean(axis=0), axis=2)))
+
+    def frame(self, xpos, hd):
+        lm = self.lm
+        ang = []
+        for a, b in self.segs:
+            vr = xpos[b] - xpos[a]
+            vh = np.asarray(hd[lm[b]][0]) - np.asarray(hd[lm[a]][0])
+            nr, nh = np.linalg.norm(vr), np.linalg.norm(vh)
+            if nr > 1e-3 and nh > 1e-3:
+                ang.append(np.degrees(np.arccos(np.clip(vr @ vh / (nr * nh), -1, 1))))
+        r0, h0 = xpos[self.root_bid], np.asarray(hd[self.root_h][0])
+        dvec = np.array([(xpos[b] - r0) - self.scale * (np.asarray(hd[lm[b]][0]) - h0)
+                         for b in lm if b != self.root_bid])
+        self.dvecs.append(dvec)
+        pos = np.linalg.norm(dvec, axis=1)
+        flips, nflip = 0, 0
+        for a, b, c in self.trip:
+            def bendn(pa, pb, pc):
+                v1, v2 = pa - pb, pc - pb
+                cr = np.cross(v1, v2)
+                return cr / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-9)
+            br = bendn(xpos[a], xpos[b], xpos[c])
+            bh = bendn(*(np.asarray(hd[lm[x]][0]) for x in (a, b, c)))
+            if np.linalg.norm(bh) > 0.17 and np.linalg.norm(br) > 0.17:  # 둘 다 10° 이상 굽음
+                nflip += 1
+                flips += float(br @ bh < 0)
+        return np.mean(ang) if ang else np.nan, np.mean(pos), flips, nflip
+
+
+def make_retargeter(method, format_type, robot, human_height, frames, bone_hierarchy, **kw):
+    if method == "chain":
+        r = ChainMotionRetargeting(
+            src_human=f"bvh_{format_type}" if format_type != "robot" else "robot",
+            tgt_robot=robot, actual_human_height=human_height, verbose=False)
+        r._bone_hierarchy = bone_hierarchy
+    elif method == "ik":
+        r = GMR(src_human=f"bvh_{format_type}", tgt_robot=robot,
+                actual_human_height=human_height, solver="daqp", verbose=False)
+    elif method == "auto":
+        r = AutoChainRetargeting(robot, **kw)
+        r.prepare(frames, bone_hierarchy)
+    else:
+        raise ValueError(method)
+    return r
+
+
+def evaluate_single(bvh_file, format_type, robot, method, max_frames=None, fps=30.0, **kw):
     """단일 BVH 파일에 대해 retarget 수행 및 메트릭 수집."""
 
-    # Load BVH
     frames, human_height, bone_hierarchy = load_bvh_file(bvh_file, format=format_type)
     if max_frames:
         frames = frames[:max_frames]
 
-    # Init retargeter
-    if method == "chain":
-        retargeter = ChainMotionRetargeting(
-            src_human=f"bvh_{format_type}" if format_type != "robot" else "robot",
-            tgt_robot=robot,
-            actual_human_height=human_height,
-            verbose=False,
-        )
-        retargeter._bone_hierarchy = bone_hierarchy
-    else:
-        retargeter = GMR(
-            src_human=f"bvh_{format_type}",
-            tgt_robot=robot,
-            actual_human_height=human_height,
-            solver="daqp",
-            verbose=False,
-        )
+    retargeter = make_retargeter(method, format_type, robot, human_height, frames, bone_hierarchy, **kw)
+    model = retargeter.model if method != "ik" else retargeter.configuration.model
+    stand = int(np.argmax([f[bone_hierarchy['bones'][0]][0][2] - min(v[0][2] for v in f.values())
+                           for f in frames]))
+    common = CommonMetrics(robot, format_type, model, frames[stand])
 
-    # Metrics storage
-    frame_g_mpbpe = []   # per-frame global error
-    frame_mpbpe = []     # per-frame root-relative error
-    chain_errors = {}    # chain_name -> {'global': [], 'relative': []}
-
-    mapping = None
-    root_name = None
-    root_bid = None
-
+    frame_g_mpbpe, frame_mpbpe = [], []
+    chain_errors = {}
+    c_dir, c_pos, flips, nflip = [], [], 0, 0
+    qs = []
+    mapping = root_name = root_bid = None
     n_errors = 0
-    for fi, human_data in enumerate(tqdm(frames, desc=os.path.basename(bvh_file), leave=False)):
+    t0 = time.time()
+
+    for fi, human_data in enumerate(tqdm(frames, desc=os.path.basename(bvh_file), leave=False,
+                                         disable=kw.get('quiet', True))):
         try:
             qpos = retargeter.retarget(human_data)
         except Exception:
             n_errors += 1
             continue
-
-        # Lazy init mapping (after first retarget sets up CLI matching etc.)
-        if mapping is None:
-            mapping = get_body_mapping(retargeter, method)
-            root_name, root_bid = get_root_info(retargeter, method)
-            for _, _, cname in mapping:
-                if cname not in chain_errors:
-                    chain_errors[cname] = {'global': [], 'relative': []}
-
-        scaled = retargeter.scaled_human_data
         xpos = get_target_xpos(retargeter, method)
+        qs.append(np.array(qpos, dtype=float).copy())
 
-        if root_name not in scaled:
-            continue
-
-        src_root = np.asarray(scaled[root_name][0])
-        tgt_root = xpos[root_bid].copy()
-
-        g_errors = []
-        r_errors = []
-
-        for src_body, tgt_bid, cname in mapping:
-            if src_body not in scaled:
+        g_errors, r_errors = [], []
+        if method == "auto":
+            pts = retargeter.own_reference_points(human_data)
+            rp, sp = retargeter.pelvis_points(human_data)
+            for p_r, p_s, j in pts:
+                cname = retargeter.chains[j]['name']
+                g_err = np.linalg.norm(p_r - p_s)
+                r_err = np.linalg.norm((p_r - rp) - (p_s - sp))
+                g_errors.append(g_err)
+                r_errors.append(r_err)
+                chain_errors.setdefault(cname, {'global': [], 'relative': []})
+                chain_errors[cname]['global'].append(g_err)
+                chain_errors[cname]['relative'].append(r_err)
+            mapping = pts
+        else:
+            if mapping is None:
+                mapping = get_body_mapping(retargeter, method)
+                root_name, root_bid = get_root_info(retargeter, method)
+                for _, _, cname in mapping:
+                    chain_errors.setdefault(cname, {'global': [], 'relative': []})
+            scaled = retargeter.scaled_human_data
+            if root_name not in scaled:
                 continue
-
-            src_pos = np.asarray(scaled[src_body][0])
-            tgt_pos = xpos[tgt_bid].copy()
-
-            # E_g-mpbpe: global position error
-            g_err = np.linalg.norm(src_pos - tgt_pos)
-            g_errors.append(g_err)
-
-            # E_mpbpe: root-relative position error
-            src_rel = src_pos - src_root
-            tgt_rel = tgt_pos - tgt_root
-            r_err = np.linalg.norm(src_rel - tgt_rel)
-            r_errors.append(r_err)
-
-            chain_errors[cname]['global'].append(g_err)
-            chain_errors[cname]['relative'].append(r_err)
-
+            src_root = np.asarray(scaled[root_name][0])
+            tgt_root = xpos[root_bid].copy()
+            for src_body, tgt_bid, cname in mapping:
+                if src_body not in scaled:
+                    continue
+                src_pos = np.asarray(scaled[src_body][0])
+                tgt_pos = xpos[tgt_bid].copy()
+                g_err = np.linalg.norm(src_pos - tgt_pos)
+                r_err = np.linalg.norm((src_pos - src_root) - (tgt_pos - tgt_root))
+                g_errors.append(g_err)
+                r_errors.append(r_err)
+                chain_errors[cname]['global'].append(g_err)
+                chain_errors[cname]['relative'].append(r_err)
         if g_errors:
             frame_g_mpbpe.append(np.mean(g_errors))
             frame_mpbpe.append(np.mean(r_errors))
+        if common.ok:
+            a, p, fl, nf = common.frame(xpos, human_data)
+            c_dir.append(a)
+            c_pos.append(p)
+            flips += fl
+            nflip += nf
 
-    # Aggregate
+    elapsed = time.time() - t0
     result = {
-        'bvh_file': os.path.basename(bvh_file),
-        'robot': robot,
-        'method': method,
-        'n_frames': len(frame_g_mpbpe),
-        'n_mapped_bodies': len(mapping) if mapping else 0,
-        'n_errors': n_errors,
+        'bvh_file': os.path.basename(bvh_file), 'robot': robot, 'method': method,
+        'n_frames': len(frame_g_mpbpe), 'n_mapped_bodies': len(mapping) if mapping else 0,
+        'n_errors': n_errors, 'sec_per_frame': elapsed / max(len(frames), 1),
     }
-
     if frame_g_mpbpe:
-        g = np.array(frame_g_mpbpe)
-        r = np.array(frame_mpbpe)
-        result['E_g_mpbpe_mean'] = float(np.mean(g))
-        result['E_g_mpbpe_std'] = float(np.std(g))
-        result['E_g_mpbpe_median'] = float(np.median(g))
-        result['E_g_mpbpe_max'] = float(np.max(g))
-        result['E_mpbpe_mean'] = float(np.mean(r))
-        result['E_mpbpe_std'] = float(np.std(r))
-        result['E_mpbpe_median'] = float(np.median(r))
-        result['E_mpbpe_max'] = float(np.max(r))
-
-        # Per-chain
-        result['per_chain'] = {}
-        for cname, errs in chain_errors.items():
-            if errs['global']:
-                result['per_chain'][cname] = {
-                    'E_g_mean': float(np.mean(errs['global'])),
-                    'E_r_mean': float(np.mean(errs['relative'])),
-                }
+        g, r = np.array(frame_g_mpbpe), np.array(frame_mpbpe)
+        result.update({
+            'E_g_mpbpe_mean': float(np.mean(g)), 'E_g_mpbpe_std': float(np.std(g)),
+            'E_g_mpbpe_median': float(np.median(g)), 'E_g_mpbpe_max': float(np.max(g)),
+            'E_mpbpe_mean': float(np.mean(r)), 'E_mpbpe_std': float(np.std(r)),
+            'E_mpbpe_median': float(np.median(r)), 'E_mpbpe_max': float(np.max(r)),
+        })
+        result['per_chain'] = {c: {'E_g_mean': float(np.mean(e['global'])),
+                                   'E_r_mean': float(np.mean(e['relative']))}
+                               for c, e in chain_errors.items() if e['global']}
     else:
-        result['E_g_mpbpe_mean'] = float('nan')
-        result['E_mpbpe_mean'] = float('nan')
-
+        result['E_g_mpbpe_mean'] = result['E_mpbpe_mean'] = float('nan')
+    if c_dir:
+        result['E_dir_deg'] = float(np.nanmean(c_dir))
+        result['E_cmp'] = float(np.mean(c_pos))
+        result['flip_rate'] = flips / max(nflip, 1)
+        result['E_cmp_dyn'] = common.dynamic_error()
+    if len(qs) > 2:
+        Q = np.array(qs)
+        j0 = 7 if model.njnt > 0 and model.jnt_type[0] == 0 else 0
+        acc = np.diff(Q[:, j0:], n=2, axis=0) * fps ** 2
+        result['joint_acc'] = float(np.mean(np.abs(acc)))
     return result
 
 
@@ -308,7 +392,7 @@ if __name__ == "__main__":
     parser.add_argument("--robot", choices=["unitree_g1", "unitree_g1_with_hands", "booster_t1",
                                             "stanford_toddy", "fourier_n1", "engineai_pm01", "pal_talos"],
                         default="unitree_g1")
-    parser.add_argument("--method", choices=["ik", "chain"], default="chain")
+    parser.add_argument("--method", choices=["ik", "chain", "auto"], default="chain")
     parser.add_argument("--max_files", type=int, default=None, help="Max BVH files to evaluate")
     parser.add_argument("--max_frames", type=int, default=None, help="Max frames per file")
     parser.add_argument("--output_csv", type=str, default=None, help="Save results to CSV")
